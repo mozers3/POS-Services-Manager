@@ -1,7 +1,7 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.3.0'
+	Version           = '1.3.1'
 }
 
 if ($cmdLine -eq "COMPILE") { 
@@ -84,7 +84,6 @@ function Create-Form () {
 				} else {
 					[void](Stop-Service -Name $ServiceName -Force -ErrorAction Stop -WarningAction SilentlyContinue)
 				}
-# 				Update-ServiceStatus -ServiceName $ServiceName
 			} catch {
 				[System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "Error", 'OK', 'Error')
 			}
@@ -158,32 +157,11 @@ function Create-Form () {
 	[void]$dgv.Columns.Add([System.Windows.Forms.DataGridViewTextBoxColumn]@{ Name="VidPid"; HeaderText="Model / VID & PID"; FillWeight=35 })
 	[void]$dgv.Columns.Add([System.Windows.Forms.DataGridViewTextBoxColumn]@{ Name="FriendlyName"; HeaderText="FriendlyName"; FillWeight=40 })
 
-# 	$dgv.add_CellFormatting({
-# 		param($sender, $e)
-# 		if ($e.RowIndex -lt 0) { return }
-# 		$statusValue = $sender.Rows[$e.RowIndex].Cells["Status"].Value
-# 		if ($statusValue -ne $null -and $statusValue -ne "Free") {
-# 			$e.CellStyle.ForeColor = [System.Drawing.Color]::LightCoral
-# 			$e.CellStyle.SelectionForeColor = [System.Drawing.Color]::LightCoral
-# 		} else {
-# 			$e.CellStyle.ForeColor = $sender.DefaultCellStyle.ForeColor
-# 			$e.CellStyle.SelectionForeColor = $sender.DefaultCellStyle.SelectionForeColor
-# 		}
-# 	})
-
 	$dgv.AutoGenerateColumns = $false
 	$dgv.Columns["Status"].DataPropertyName = "Status"
 	$dgv.Columns["COM"].DataPropertyName = "COM"
 	$dgv.Columns["VidPid"].DataPropertyName = "VidPid"
 	$dgv.Columns["FriendlyName"].DataPropertyName = "FriendlyName"
-
-# 	$dt = New-Object System.Data.DataTable
-# 	[void]$dt.Columns.Add("Status", [string])
-# 	[void]$dt.Columns.Add("COM", [string])
-# 	[void]$dt.Columns.Add("VidPid", [string])
-# 	[void]$dt.Columns.Add("FriendlyName", [string])
-
-# 	$dgv.DataSource = $dt
 
 	$gbTop = New-Object System.Windows.Forms.GroupBox -Property @{
 		Dock = "Fill"
@@ -211,7 +189,6 @@ function Create-Form () {
 	[void]$form.Controls.Add($gbTop)
 	[void]$form.Controls.Add($bottom)
 
-# 	$form.Tag = @{ Dt = $dt; Dgv = $dgv; SrvCtrlPBF = $srvCtrlPBF; SrvCtrlDC = $srvCtrlDC }
 	$form.Tag = @{ Dgv = $dgv; SrvCtrlPBF = $srvCtrlPBF; SrvCtrlDC = $srvCtrlDC }
 
 	return $form
@@ -266,10 +243,8 @@ function Update-GridViev ($dgv, $listCOMports) {
 	foreach ($row in $dgv.Rows) { $row.Tag = "ToDelete" }
 	foreach ($port in $listCOMports) {
 		$found = $false
-		# Ищем, есть ли уже строка с таким COM-портом
 		foreach ($row in $dgv.Rows) {
 			if ($row.Cells["COM"].Value -eq $port.COM) {
-				# Строка существует: обновляем только данные, объект строки остается тем же!
 				$row.Cells["Status"].Value = $port.Status
 				$row.Cells["VidPid"].Value = $port.VidPid
 				$row.Cells["FriendlyName"].Value = $port.FriendlyName
@@ -291,7 +266,7 @@ function Update-GridViev ($dgv, $listCOMports) {
 			$dgv.Rows.Add($port.Status, $port.COM, $port.VidPid, $port.FriendlyName)
 		}
 	}
-	# 3. Удаляем только те строки, которые остались с меткой "ToDelete" (устройства отключились)
+	# Удаляем только те строки, которые остались с меткой "ToDelete" (устройства отключились)
 	for ($i = $dgv.Rows.Count - 1; $i -ge 0; $i--) {
 		if ($dgv.Rows[$i].Tag -eq "ToDelete") {
 			$dgv.Rows.RemoveAt($i)
@@ -399,8 +374,6 @@ function Get-ServiceFiles($ServiceName) {
 		}
 		'"Dual Connector Service"' {
 			$imagePath = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\DCService").ImagePath
-# 			$servicePath = ($imagePath -replace '"', '') -replace '\\bin\\.*', ''
-# 			$servicePath = ($imagePath -split '\\bin\\')[0].Trim('"')
 			$servicePath = $imagePath -replace '^"?(.+)\\bin\\.*', '$1'
 			$xmlfile = "$servicePath\config\Connector.xml"
 			if ([System.IO.File]::Exists($xmlfile)) {
