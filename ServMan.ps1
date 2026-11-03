@@ -1,7 +1,7 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.3.1'
+	Version           = '1.4.0'
 }
 
 if ($cmdLine -eq "COMPILE") { 
@@ -93,6 +93,14 @@ function Create-Form () {
 			TextAlign = "Center"
 			Margin = "10, 10, 10, 15"
 		}
+		$btnTestApp = New-Object System.Windows.Forms.Button -Property @{
+			Dock = "Fill"
+			Text = "Test"
+			Margin = "10, 5, 10, 15"
+		}
+		$btnTestApp.Add_Click({
+			Start-Process -FilePath $this.Tag
+		}.GetNewClosure())
 		$btnLog = New-Object System.Windows.Forms.Button -Property @{
 			Dock = "Fill"
 			Text = "Log"
@@ -100,31 +108,33 @@ function Create-Form () {
 		}
 		$btnLog.Add_Click({
 			if ([System.IO.File]::Exists($this.Tag)) {
-				notepad $this.Tag
+				Start-Process -FilePath notepad -ArgumentList $this.Tag
 			} else {
 				[System.Windows.Forms.MessageBox]::Show("Log от $($date.ToString('dd.MM.yyyy')) отсутствует!`n(Вероятно, сервис сегодня не запускался)", "Warning", 'OK', 'Warning')
 			}
 		}.GetNewClosure())
 
 		$tlp = New-Object System.Windows.Forms.TableLayoutPanel -Property @{
-			Dock = "Fill"; ColumnCount = 4; RowCount = 1; ForeColor = [System.Drawing.SystemColors]::ControlText
+			Dock = "Fill"; ColumnCount = 5; RowCount = 1; ForeColor = [System.Drawing.SystemColors]::ControlText
 		}
 		$ST = [System.Windows.Forms.SizeType]
 		[void]$tlp.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new($ST::Absolute, 160))
 		[void]$tlp.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new($ST::Absolute, 60))
 		[void]$tlp.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new($ST::Percent, 100))
 		[void]$tlp.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new($ST::Absolute, 90))
+		[void]$tlp.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new($ST::Absolute, 90))
 		[void]$tlp.Controls.Add($btnCOM, 0, 0)
 		[void]$tlp.Controls.Add($btnStartStop,  1, 0)
 		[void]$tlp.Controls.Add($txtStatus, 2, 0)
-		[void]$tlp.Controls.Add($btnLog, 3, 0)
+		[void]$tlp.Controls.Add($btnTestApp, 3, 0)
+		[void]$tlp.Controls.Add($btnLog, 4, 0)
 
 		$gb = New-Object System.Windows.Forms.GroupBox -Property @{
 			Text = $ServiceName; Dock = "Fill"; Padding = "5, 0, 5, 5"; ForeColor = 'Navy'
 		}
 		$gb.Controls.Add($tlp)
 
-		[PSCustomObject]@{ GroupBox = $gb; btnCOM = $btnCOM; btnStartStop = $btnStartStop; txtStatus = $txtStatus; btnLog = $btnLog; }
+		[PSCustomObject]@{ GroupBox = $gb; btnCOM = $btnCOM; btnStartStop = $btnStartStop; txtStatus = $txtStatus; btnTestApp = $btnTestApp; btnLog = $btnLog; }
 	}
 
 	$form = New-Object System.Windows.Forms.Form -Property @{
@@ -370,6 +380,13 @@ function Get-ServiceFiles($ServiceName) {
 			} else {
 				[System.Windows.Forms.MessageBox]::Show("Файл конфигурации`n$inifile`nотсутствует!", "Warning", 'OK', 'Warning')
 			}
+			$testAppPath = $servicePath -replace '[^\\]*$', ''
+			$testApp = "$testAppPath\PosConnector\poscon_tester_gui.exe"
+			if ([System.IO.File]::Exists($testApp)) {
+				$frmMain.Tag.SrvCtrlPBF.btnTestApp.Tag = $testApp
+			} else {
+				[System.Windows.Forms.MessageBox]::Show("Тестовое приложение`n$testApp`nотсутствует!", "Warning", 'OK', 'Warning')
+			}
 			$frmMain.Tag.SrvCtrlPBF.btnLog.Tag = "$servicePath\pbfproxy_$($date.ToString('yyyy-MM-dd')).log"
 		}
 		'"Dual Connector Service"' {
@@ -382,6 +399,14 @@ function Get-ServiceFiles($ServiceName) {
 				$frmMain.Tag.SrvCtrlDC.btnCOM.Tag = $xmlfile
 			} else {
 				[System.Windows.Forms.MessageBox]::Show("Файл конфигурации`n$xmlfile`nотсутствует!", "Warning", 'OK', 'Warning')
+			}
+			$testAppPath = $servicePath -replace '[^\\]*$', ''
+			$testApp = "$testAppPath\DCControl.bat"
+			if (![System.IO.File]::Exists($testApp)) { $testApp = "$testAppPath\DC Control.exe" } # Pos Connector version 0.1.?
+			if ([System.IO.File]::Exists($testApp)) {
+				$frmMain.Tag.SrvCtrlDC.btnTestApp.Tag = $testApp
+			} else {
+				[System.Windows.Forms.MessageBox]::Show("Тестовое приложение`n$testApp`nотсутствует!", "Warning", 'OK', 'Warning')
 			}
 			$frmMain.Tag.SrvCtrlDC.btnLog.Tag = "$servicePath\log\Connector$($date.ToString('yyyyMMdd')).log"
 		}
