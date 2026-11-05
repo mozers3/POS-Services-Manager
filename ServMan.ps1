@@ -1,7 +1,7 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.4.0'
+	Version           = '1.4.2'
 }
 
 if ($cmdLine -eq "COMPILE") { 
@@ -15,6 +15,7 @@ if ($cmdLine -eq "COMPILE") {
 	}
 	$iconPath = "$PSScriptRoot\ServMan.ico"
 	Invoke-PS2EXE -InputFile $PSCommandPath -x64 -noConsole -verbose -IconFile $iconPath -Title $Config.Title -Product $Config.Title -Copyright 'https://github.com/mozers3' -Company 'mozers™' -Version $Config.Version
+	Set-Content -Path version -Value $Config.Version
 	Exit 0
 }
 
@@ -296,6 +297,7 @@ function Update-ServiceStatus($svControl) {
 			$svControl.TxtStatus.BackColor = 'Red'
 			$svControl.BtnStartStop.Enabled = $false
 			$svControl.BtnCOM.Enabled = $false
+			$svControl.btnTestApp.Enabled = $false
 			$svControl.BtnLog.Enabled = $false
 		}
 		return
@@ -386,6 +388,7 @@ function Get-ServiceFiles($ServiceName) {
 				$frmMain.Tag.SrvCtrlPBF.btnTestApp.Tag = $testApp
 			} else {
 				[System.Windows.Forms.MessageBox]::Show("Тестовое приложение`n$testApp`nотсутствует!", "Warning", 'OK', 'Warning')
+				$frmMain.Tag.SrvCtrlPBF.btnTestApp.Enabled = $false
 			}
 			$frmMain.Tag.SrvCtrlPBF.btnLog.Tag = "$servicePath\pbfproxy_$($date.ToString('yyyy-MM-dd')).log"
 		}
@@ -407,6 +410,7 @@ function Get-ServiceFiles($ServiceName) {
 				$frmMain.Tag.SrvCtrlDC.btnTestApp.Tag = $testApp
 			} else {
 				[System.Windows.Forms.MessageBox]::Show("Тестовое приложение`n$testApp`nотсутствует!", "Warning", 'OK', 'Warning')
+				$frmMain.Tag.SrvCtrlDC.btnTestApp.Enabled = $false
 			}
 			$frmMain.Tag.SrvCtrlDC.btnLog.Tag = "$servicePath\log\Connector$($date.ToString('yyyyMMdd')).log"
 		}
