@@ -1,7 +1,7 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.5.0'
+	Version           = '1.5.1'
 }
 
 if ($cmdLine -eq "COMPILE") { 
@@ -14,7 +14,7 @@ if ($cmdLine -eq "COMPILE") {
 		}
 	}
 	$iconPath = "$PSScriptRoot\ServMan.ico"
-	Invoke-PS2EXE -InputFile $PSCommandPath -x64 -noConsole -verbose -IconFile $iconPath -Title $Config.Title -Product $Config.Title -Copyright 'https://github.com/mozers3' -Company 'mozers™' -Version $Config.Version
+	Invoke-PS2EXE -InputFile $PSCommandPath -x86 -noConsole -verbose -IconFile $iconPath -Title $Config.Title -Product $Config.Title -Copyright 'https://github.com/mozers3' -Company 'mozers™' -Version $Config.Version
 	Set-Content -Path version -Value $Config.Version
 	Exit 0
 }
@@ -442,8 +442,8 @@ function Update-GridViev ($dgv, $listCOMports) {
 				$row.Cells["FriendlyName"].Value = $port.FriendlyName
 
 				if ($port.Status -ne "Free") {
-					$row.DefaultCellStyle.ForeColor = [System.Drawing.Color]::LightCoral
-					$row.DefaultCellStyle.SelectionForeColor = [System.Drawing.Color]::LightCoral
+					$row.DefaultCellStyle.ForeColor = 'Orange'
+					$row.DefaultCellStyle.SelectionForeColor = 'Yellow'
 				} else {
 					$row.DefaultCellStyle = New-Object System.Windows.Forms.DataGridViewCellStyle
 				}
