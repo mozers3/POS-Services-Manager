@@ -1,7 +1,7 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.4.2'
+	Version           = '1.5.0'
 }
 
 if ($cmdLine -eq "COMPILE") { 
@@ -29,7 +29,12 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 }
 
 # ==============================================================================
-$date = Get-Date
+$Date = Get-Date
+$Service = @{
+	DC  = '"Dual Connector Service"'
+	PBF = 'PBF Proxy Service'
+	OFD = 'OFD Proxy Service'
+}
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -65,6 +70,170 @@ Add-Type -Namespace '' -Name 'ComPortProbe' -MemberDefinition @'
 	}
 '@
 
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
+using Microsoft.Win32;
+
+public class HiddenUsbCleaner {
+	[DllImport("setupapi.dll", CharSet = CharSet.Auto, SetLastError = true)]
+	static extern IntPtr SetupDiGetClassDevs(ref Guid ClassGuid, string Enumerator, IntPtr hwndParent, uint Flags);
+
+	[DllImport("setupapi.dll", SetLastError = true)]
+	static extern bool SetupDiEnumDeviceInfo(IntPtr DeviceInfoSet, uint MemberIndex, ref SP_DEVINFO_DATA DeviceInfoData);
+
+	[DllImport("setupapi.dll", CharSet = CharSet.Auto, SetLastError = true)]
+	static extern bool SetupDiGetDeviceInstanceId(IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData, StringBuilder DeviceInstanceId, int DeviceInstanceIdSize, out int RequiredSize);
+
+	[DllImport("setupapi.dll", CharSet = CharSet.Auto, SetLastError = true)]
+	static extern bool SetupDiGetDeviceRegistryProperty(IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData, uint Property, out uint PropertyRegDataType, byte[] PropertyBuffer, uint PropertyBufferSize, out uint RequiredSize);
+
+	[DllImport("setupapi.dll", SetLastError = true)]
+	static extern bool SetupDiRemoveDevice(IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData);
+
+	[DllImport("setupapi.dll", SetLastError = true)]
+	static extern bool SetupDiDestroyDeviceInfoList(IntPtr DeviceInfoSet);
+
+	[StructLayout(LayoutKind.Sequential)]
+	public struct SP_DEVINFO_DATA {
+		public uint cbSize;
+		public Guid ClassGuid;
+		public uint DevInst;
+		public IntPtr Reserved;
+	}
+
+	const uint DIGCF_PRESENT = 0x00000002;
+	const uint SPDRP_FRIENDLYNAME = 0x0000000C;
+
+	private static readonly Guid PortsClassGuid = new Guid("{4D36E978-E325-11CE-BFC1-08002BE10318}");
+
+	public static List<string> Clean() {
+		List<string> removedDevices = new List<string>();
+		Guid classGuid = PortsClassGuid;
+		HashSet<int> activeComPorts = new HashSet<int>();
+
+		IntPtr hDevInfoPresent = SetupDiGetClassDevs(ref classGuid, null, IntPtr.Zero, DIGCF_PRESENT);
+		if (hDevInfoPresent != IntPtr.Zero && hDevInfoPresent != new IntPtr(-1)) {
+			SP_DEVINFO_DATA devInfoPresent = new SP_DEVINFO_DATA();
+			devInfoPresent.cbSize = (uint)Marshal.SizeOf(typeof(SP_DEVINFO_DATA));
+
+			for (uint i = 0; SetupDiEnumDeviceInfo(hDevInfoPresent, i, ref devInfoPresent); i++) {
+				string friendlyName = GetRegistryString(hDevInfoPresent, ref devInfoPresent, SPDRP_FRIENDLYNAME);
+				if (!string.IsNullOrEmpty(friendlyName)) {
+					Match match = Regex.Match(friendlyName, @"(?:\(|\s)(COM)(\d+)(?:\)|\s|$)", RegexOptions.IgnoreCase);
+					if (match.Success) {
+						int comNum;
+						if (int.TryParse(match.Groups[2].Value, out comNum)) {
+							activeComPorts.Add(comNum);
+						}
+					}
+				}
+			}
+			SetupDiDestroyDeviceInfoList(hDevInfoPresent);
+		}
+
+		IntPtr hDevInfoAll = SetupDiGetClassDevs(ref classGuid, null, IntPtr.Zero, 0);
+		if (hDevInfoAll != IntPtr.Zero && hDevInfoAll != new IntPtr(-1)) {
+			SP_DEVINFO_DATA devInfoAll = new SP_DEVINFO_DATA();
+			devInfoAll.cbSize = (uint)Marshal.SizeOf(typeof(SP_DEVINFO_DATA));
+
+			for (uint i = 0; SetupDiEnumDeviceInfo(hDevInfoAll, i, ref devInfoAll); i++) {
+				string instanceId = GetInstanceId(hDevInfoAll, ref devInfoAll);
+				if (string.IsNullOrEmpty(instanceId)) continue;
+
+				if (!IsDevicePresent(hDevInfoAll, ref devInfoAll, classGuid, instanceId) && IsUsbDevice(instanceId)) {
+					if (SetupDiRemoveDevice(hDevInfoAll, ref devInfoAll)) {
+						removedDevices.Add(instanceId);
+					}
+				}
+			}
+			SetupDiDestroyDeviceInfoList(hDevInfoAll);
+		}
+
+		FreeUnusedComPorts(activeComPorts);
+		return removedDevices;
+	}
+
+	private static bool IsDevicePresent(IntPtr hDevInfoAll, ref SP_DEVINFO_DATA devInfoAll, Guid classGuid, string targetInstanceId) {
+		IntPtr hDevInfoPresent = SetupDiGetClassDevs(ref classGuid, null, IntPtr.Zero, DIGCF_PRESENT);
+		bool found = false;
+		if (hDevInfoPresent != IntPtr.Zero && hDevInfoPresent != new IntPtr(-1)) {
+			SP_DEVINFO_DATA devInfoPresent = new SP_DEVINFO_DATA();
+			devInfoPresent.cbSize = (uint)Marshal.SizeOf(typeof(SP_DEVINFO_DATA));
+			for (uint i = 0; SetupDiEnumDeviceInfo(hDevInfoPresent, i, ref devInfoPresent); i++) {
+				if (GetInstanceId(hDevInfoPresent, ref devInfoPresent) == targetInstanceId) {
+					found = true;
+					break;
+				}
+			}
+			SetupDiDestroyDeviceInfoList(hDevInfoPresent);
+		}
+		return found;
+	}
+
+	private static bool IsUsbDevice(string instanceId) {
+		return instanceId.StartsWith("USB\\", StringComparison.OrdinalIgnoreCase) ||
+				instanceId.StartsWith("FTDIBUS\\", StringComparison.OrdinalIgnoreCase) ||
+				instanceId.StartsWith("USBVID_", StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static string GetInstanceId(IntPtr hDevInfo, ref SP_DEVINFO_DATA devInfoData) {
+		int requiredSize = 0;
+		SetupDiGetDeviceInstanceId(hDevInfo, ref devInfoData, null, 0, out requiredSize);
+		if (requiredSize == 0) return null;
+
+		StringBuilder sb = new StringBuilder(requiredSize);
+		if (SetupDiGetDeviceInstanceId(hDevInfo, ref devInfoData, sb, sb.Capacity, out requiredSize)) {
+			return sb.ToString();
+		}
+		return null;
+	}
+
+	private static string GetRegistryString(IntPtr hDevInfo, ref SP_DEVINFO_DATA devInfoData, uint property) {
+		uint propertyType;
+		uint requiredSize;
+		int bufferSize = 1024;
+		byte[] buffer = new byte[bufferSize];
+
+		if (SetupDiGetDeviceRegistryProperty(hDevInfo, ref devInfoData, property, out propertyType, buffer, (uint)bufferSize, out requiredSize)) {
+			return Encoding.Unicode.GetString(buffer).TrimEnd('\0');
+		}
+		return null;
+	}
+
+	private static void FreeUnusedComPorts(HashSet<int> activeComPorts) {
+		try {
+			using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\COM Name Arbiter", true)) {
+				if (key == null) return;
+
+				byte[] comDb = (byte[])key.GetValue("ComDB");
+				if (comDb == null || comDb.Length == 0) return;
+
+				bool modified = false;
+				for (int i = 0; i < comDb.Length; i++) {
+					for (int bit = 0; bit < 8; bit++) {
+						int comNumber = (i * 8) + bit + 1;
+						bool isMarkedAsUsed = (comDb[i] & (1 << bit)) != 0;
+
+						if (isMarkedAsUsed && !activeComPorts.Contains(comNumber)) {
+							comDb[i] &= (byte)~(1 << bit);
+							modified = true;
+						}
+					}
+				}
+
+				if (modified) {
+					key.SetValue("ComDB", comDb, RegistryValueKind.Binary);
+				}
+			}
+		} catch {}
+	}
+}
+'@ -Language CSharp -ErrorAction Stop
+
 function Create-Form () {
 	function New-ServiceControl([string]$ServiceName) {
 		$btnCOM = New-Object System.Windows.Forms.Button -Property @{
@@ -89,11 +258,13 @@ function Create-Form () {
 				[System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "Error", 'OK', 'Error')
 			}
 		}.GetNewClosure())
+
 		$txtStatus = New-Object System.Windows.Forms.TextBox -Property @{
 			Dock = "Fill"
 			TextAlign = "Center"
 			Margin = "10, 10, 10, 15"
 		}
+
 		$btnTestApp = New-Object System.Windows.Forms.Button -Property @{
 			Dock = "Fill"
 			Text = "Test"
@@ -102,6 +273,9 @@ function Create-Form () {
 		$btnTestApp.Add_Click({
 			Start-Process -FilePath $this.Tag
 		}.GetNewClosure())
+		$btnTestAppToolTip = if ($ServiceName -eq $Service.DC) { "DC Control"} else { "POS Connector"}
+		$toolTip.SetToolTip($btnTestApp, $btnTestAppToolTip)
+
 		$btnLog = New-Object System.Windows.Forms.Button -Property @{
 			Dock = "Fill"
 			Text = "Log"
@@ -111,7 +285,7 @@ function Create-Form () {
 			if ([System.IO.File]::Exists($this.Tag)) {
 				Start-Process -FilePath notepad -ArgumentList $this.Tag
 			} else {
-				[System.Windows.Forms.MessageBox]::Show("Log от $($date.ToString('dd.MM.yyyy')) отсутствует!`n(Вероятно, сервис сегодня не запускался)", "Warning", 'OK', 'Warning')
+				[System.Windows.Forms.MessageBox]::Show("Log от $($Date.ToString('dd.MM.yyyy')) отсутствует!`n(Вероятно, сервис сегодня не запускался)", "Warning", 'OK', 'Warning')
 			}
 		}.GetNewClosure())
 
@@ -168,11 +342,18 @@ function Create-Form () {
 	[void]$dgv.Columns.Add([System.Windows.Forms.DataGridViewTextBoxColumn]@{ Name="VidPid"; HeaderText="Model / VID & PID"; FillWeight=35 })
 	[void]$dgv.Columns.Add([System.Windows.Forms.DataGridViewTextBoxColumn]@{ Name="FriendlyName"; HeaderText="FriendlyName"; FillWeight=40 })
 
-	$dgv.AutoGenerateColumns = $false
-	$dgv.Columns["Status"].DataPropertyName = "Status"
-	$dgv.Columns["COM"].DataPropertyName = "COM"
-	$dgv.Columns["VidPid"].DataPropertyName = "VidPid"
-	$dgv.Columns["FriendlyName"].DataPropertyName = "FriendlyName"
+	$cms = New-Object System.Windows.Forms.ContextMenuStrip
+	$menuItem = $cms.Items.Add('Вычистить COM порты (высвободить номера)')
+	$menuItem.Add_Click({ 
+		$removedList = [HiddenUsbCleaner]::Clean()
+		if ($removedList.Count -eq 0) {
+			$msg = "Скрытые USB-устройства не найдены. Реестр COM-портов проверен."
+		} else {
+			$msg = "Удалено $($removedList.Count) скрытых USB-устройств и освобождены занятые ими COM-порты"
+		}
+		[System.Windows.Forms.MessageBox]::Show($msg, "Успех", 'OK', 'Information')
+	})
+	$dgv.ContextMenuStrip = $cms
 
 	$gbTop = New-Object System.Windows.Forms.GroupBox -Property @{
 		Dock = "Fill"
@@ -190,8 +371,8 @@ function Create-Form () {
 	[void]$bottom.RowStyles.Add([System.Windows.Forms.RowStyle]::new($ST::Percent, 50))
 	[void]$bottom.RowStyles.Add([System.Windows.Forms.RowStyle]::new($ST::Percent, 50))
 
-	$srvCtrlPBF = New-ServiceControl 'PBF Proxy Service'
-	$srvCtrlDC = New-ServiceControl '"Dual Connector Service"'
+	$srvCtrlPBF = New-ServiceControl $Service.PBF
+	$srvCtrlDC = New-ServiceControl $Service.DC
 	$srvCtrlPBF.GroupBox.Margin = "0, 5, 0, 5"
 	$srvCtrlDC.GroupBox.Margin = "0, 5, 0, 0"
 	[void]$bottom.Controls.Add($srvCtrlPBF.GroupBox, 0, 0)
@@ -365,7 +546,7 @@ function Get-ServiceFiles($ServiceName) {
 	if (-not $svc) {return ""}
 
 	switch ($ServiceName) {
-		'PBF Proxy Service' {
+		$Service.PBF {
 			$imagePath = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName").ImagePath
 			$servicePath = $imagePath -replace '^"?(.+)\\.*', '$1'
 			$inifile = "$servicePath\config.ini"
@@ -390,9 +571,9 @@ function Get-ServiceFiles($ServiceName) {
 				[System.Windows.Forms.MessageBox]::Show("Тестовое приложение`n$testApp`nотсутствует!", "Warning", 'OK', 'Warning')
 				$frmMain.Tag.SrvCtrlPBF.btnTestApp.Enabled = $false
 			}
-			$frmMain.Tag.SrvCtrlPBF.btnLog.Tag = "$servicePath\pbfproxy_$($date.ToString('yyyy-MM-dd')).log"
+			$frmMain.Tag.SrvCtrlPBF.btnLog.Tag = "$servicePath\pbfproxy_$($Date.ToString('yyyy-MM-dd')).log"
 		}
-		'"Dual Connector Service"' {
+		$Service.DC {
 			$imagePath = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\DCService").ImagePath
 			$servicePath = $imagePath -replace '^"?(.+)\\bin\\.*', '$1'
 			$xmlfile = "$servicePath\config\Connector.xml"
@@ -412,7 +593,7 @@ function Get-ServiceFiles($ServiceName) {
 				[System.Windows.Forms.MessageBox]::Show("Тестовое приложение`n$testApp`nотсутствует!", "Warning", 'OK', 'Warning')
 				$frmMain.Tag.SrvCtrlDC.btnTestApp.Enabled = $false
 			}
-			$frmMain.Tag.SrvCtrlDC.btnLog.Tag = "$servicePath\log\Connector$($date.ToString('yyyyMMdd')).log"
+			$frmMain.Tag.SrvCtrlDC.btnLog.Tag = "$servicePath\log\Connector$($Date.ToString('yyyyMMdd')).log"
 		}
 	}
 }
@@ -462,8 +643,8 @@ $frmMain.Text = "$($Config.Title) v$($Config.Version)"
 
 $frmMain.Add_Shown({
 	$frmMain.Activate()
-	Get-ServiceFiles 'PBF Proxy Service'
-	Get-ServiceFiles '"Dual Connector Service"'
+	Get-ServiceFiles $Service.PBF
+	Get-ServiceFiles $Service.DC
 	$timer.Start()
 })
 
@@ -494,15 +675,15 @@ $frmMain.Tag.SrvCtrlPBF.btnCOM.Add_Click({
 		[System.Windows.Forms.MessageBox]::Show("Задаю параметры только для`nUniTodi P8 Bio`nAisino A99 Lite", "Warning", 'OK', 'Warning')
 		return
 	}
-	if ([System.Windows.Forms.MessageBox]::Show("Изменить конфигурацию сервиса для $model ?`nБудут заданы name=$port, VID=$dVID, PID=$dPID, speed=$speed", "Подтверждение", "YesNo", "Question") -eq "Yes") {
-		Stop-Service -Name 'PBF Proxy Service' -Force -ErrorAction Stop -WarningAction SilentlyContinue
+	if ([System.Windows.Forms.MessageBox]::Show("Изменить конфигурацию сервиса для $model ?`nБудут заданы:`nname=$port, VID=$dVID, PID=$dPID, speed=$speed", "Подтверждение", "YesNo", "Question") -eq "Yes") {
+		Stop-Service -Name $Service.PBF -Force -ErrorAction Stop -WarningAction SilentlyContinue
 		$config = IniContent -FilePath $inifile
 		$config["SerialPort"]["name"] = $port
 		$config["SerialPort"]["vid"] = $dVid
 		$config["SerialPort"]["pid"] = $dPid
 		$config["SerialPort"]["speed"] = $speed
 		IniContent -FilePath $inifile -Config $config
-		Get-ServiceFiles 'PBF Proxy Service'
+		Get-ServiceFiles $Service.PBF
 	}
 })
 
@@ -511,9 +692,9 @@ $frmMain.Tag.SrvCtrlDC.btnCOM.Add_Click({
 	$port = $frmMain.Tag.Dgv.CurrentRow.Cells[1].Value
 	$model = $frmMain.Tag.Dgv.CurrentRow.Cells[2].Value
 	if ([System.Windows.Forms.MessageBox]::Show("Изменить конфигурацию сервиса?`nБудет задан CONNECTION_PORT $port", "Подтверждение", "YesNo", "Question") -eq "Yes") {
-		Stop-Service -Name '"Dual Connector Service"' -Force -ErrorAction Stop -WarningAction SilentlyContinue
+		Stop-Service -Name $Service.DC -Force -ErrorAction Stop -WarningAction SilentlyContinue
 		(Get-Content $xmlfile -Raw) -replace '(?<=<CONNECTION_PORT>).*?(?=</CONNECTION_PORT>)', $port | Set-Content $xmlfile -Encoding UTF8
-		Get-ServiceFiles '"Dual Connector Service"'
+		Get-ServiceFiles $Service.DC
 	}
 })
 
