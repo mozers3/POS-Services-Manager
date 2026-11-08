@@ -1,7 +1,8 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.5.1'
+	Version           = '1.6.0'
+	ServerUrl         = 'https://raw.githubusercontent.com/mozers3/POS-Services-Manager/main'
 }
 
 if ($cmdLine -eq "COMPILE") { 
@@ -15,7 +16,9 @@ if ($cmdLine -eq "COMPILE") {
 	}
 	$iconPath = "$PSScriptRoot\ServMan.ico"
 	Invoke-PS2EXE -InputFile $PSCommandPath -x86 -noConsole -verbose -IconFile $iconPath -Title $Config.Title -Product $Config.Title -Copyright 'https://github.com/mozers3' -Company 'mozers™' -Version $Config.Version
-	Set-Content -Path version -Value $Config.Version
+	$exePath = [System.IO.Path]::ChangeExtension($PSCommandPath, '.exe')
+	$hash = (Get-FileHash -Path $exePath -Algorithm MD5).Hash
+	Set-Content -Path "version" -Value "$($Config.Version)*$hash"
 	Exit 0
 }
 
@@ -233,6 +236,84 @@ public class HiddenUsbCleaner {
 	}
 }
 '@ -Language CSharp -ErrorAction Stop
+
+function Get-Update {
+	if ($PSCommandPath) {
+		$currentPath = $PSCommandPath
+		$scriptDir = $PSScriptRoot
+	} else {
+		$currentPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+		$scriptDir = Split-Path $currentPath
+	}
+	$baseName = [System.IO.Path]::GetFileNameWithoutExtension($currentPath)
+
+	[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+	$ProgressPreference = 'SilentlyContinue'
+
+	$remoteVersion = $null
+	$headers = @{ 'Cache-Control'='no-cache'; 'Pragma'='no-cache' }
+	$versionUrl = "$($Config.ServerUrl)/version?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+	try {
+		$response = Invoke-WebRequest -Uri $versionUrl -TimeoutSec 3 -UseBasicParsing -Headers $headers -ErrorAction Stop
+		$remoteVersion = $response.Content.Trim()
+	} catch {
+		return $null
+	}
+
+	if ([string]::IsNullOrEmpty($remoteVersion)) { return $null }
+	$ver, $hash = $remoteVersion.Split('*')
+	if ($ver -eq $Config.Version) { return $null }
+
+	$msg = "Доступна новая версия приложения: $ver`n`nЗагрузить и установить?"
+	$result = [System.Windows.Forms.MessageBox]::Show($msg, "$($Config.Title) $($Config.Version)", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+	if ($result -ne 'Yes') { return $null }
+
+	$newExePath = Join-Path $scriptDir "${baseName}_new.exe"
+	$downloadUrl = "$($Config.ServerUrl)/$baseName.exe"
+
+	try {
+		Invoke-WebRequest -Uri $downloadUrl -OutFile $newExePath -UseBasicParsing -ErrorAction Stop
+	} catch {
+		return "Ошибка загрузки файла:`n$($_.Exception.Message)"
+	}
+
+	if (!(Test-Path $newExePath)) { return "Файл не был сохранен на диск." }
+	if ($hash -ne (Get-FileHash -Path $newExePath -Algorithm MD5).Hash) {
+		Remove-Item $newExePath -Force -ErrorAction Stop
+		return "Скачан битый файл."
+	}
+
+	$updateLogic = @"
+`$appDir = '$scriptDir'
+`$baseName = '$baseName'
+`$appExe = Join-Path `$appDir "`$baseName.exe"
+`$newAppExe = Join-Path `$appDir "`${baseName}_new.exe"
+
+`$timeout = 20
+while ((Get-Process -Name `$baseName -ErrorAction SilentlyContinue) -and `$timeout -gt 0) {
+	Start-Sleep -Milliseconds 500
+	`$timeout--
+}
+Start-Sleep -Seconds 1
+
+try {
+	Remove-Item `$appExe -Force -ErrorAction Stop
+	Rename-Item `$newAppExe "`$baseName.exe" -Force -ErrorAction Stop
+	Start-Process `$appExe -WorkingDirectory `$appDir
+} catch {
+	Add-Type -AssemblyName System.Windows.Forms
+	[void][System.Windows.Forms.MessageBox]::Show("Ошибка при установке обновления:`n`$_", "Ошибка", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+}
+exit
+"@
+
+	$bytes = [System.Text.Encoding]::Unicode.GetBytes($updateLogic)
+	$encodedCommand = [Convert]::ToBase64String($bytes)
+	$psArgs = "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encodedCommand"
+
+	Start-Process powershell.exe -ArgumentList $psArgs -WindowStyle Hidden
+	exit 
+}
 
 function Create-Form () {
 	function New-ServiceControl([string]$ServiceName) {
@@ -596,6 +677,12 @@ function Get-ServiceFiles($ServiceName) {
 			$frmMain.Tag.SrvCtrlDC.btnLog.Tag = "$servicePath\log\Connector$($Date.ToString('yyyyMMdd')).log"
 		}
 	}
+}
+
+# ==============================================================================
+$updateError = Get-Update
+if ($updateError) {
+	[void][System.Windows.Forms.MessageBox]::Show($updateError, "Ошибка обновления", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
 }
 
 # ==============================================================================
