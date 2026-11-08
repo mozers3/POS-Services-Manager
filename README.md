@@ -4,7 +4,7 @@
 ![Screen](screen.png)
 
 ### Возможности:
-* Работа без установки (как мобильное приложение) на 32 и 64-битной версии Windows. Скачайте и запустите [⬇️ ServMan.exe](https://raw.githubusercontent.com/mozers3/POS-Services-Manager/main/ServMan.exe)
+* Работоспособно на 32 и 64-битной версии Windows. Скачайте и запустите [⬇️ ServMan.exe](https://raw.githubusercontent.com/mozers3/POS-Services-Manager/main/ServMan.exe)
 * Приложение автоматически запрашивает права Администратора (требуется работа в привилегированном режиме)
 * Отображает все, эмулируемые через USB, подключенные COM порты.
 * Определяет популярные модели подключенных устройств
