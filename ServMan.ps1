@@ -1,7 +1,7 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.6.0'
+	Version           = '1.7.0'
 	ServerUrl         = 'https://raw.githubusercontent.com/mozers3/POS-Services-Manager/main'
 }
 
@@ -331,7 +331,7 @@ function Create-Form () {
 		$btnStartStop.Add_Click({
 			try {
 				if ($btnStartStop.Text -eq "4") {
-					[void](Start-Service -Name $ServiceName -ErrorAction Stop)
+					[void](Start-Service -Name $ServiceName -ErrorAction Stop -WarningAction SilentlyContinue)
 				} else {
 					[void](Stop-Service -Name $ServiceName -Force -ErrorAction Stop -WarningAction SilentlyContinue)
 				}
@@ -511,7 +511,7 @@ function List-COM-Ports() {
 	return $Data.ToArray()
 }
 
-function Update-GridViev ($dgv, $listCOMports) {
+function Update-DGV ($dgv, $listCOMports) {
 	$dgv.SuspendLayout()
 	foreach ($row in $dgv.Rows) { $row.Tag = "ToDelete" }
 	foreach ($port in $listCOMports) {
@@ -686,42 +686,99 @@ if ($updateError) {
 }
 
 # ==============================================================================
+$script:_isClosing = $false
+
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 2000
 
 $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
 $iss.Commands.Add([System.Management.Automation.Runspaces.SessionStateFunctionEntry]::new('List-COM-Ports', ${function:List-COM-Ports}))
-$iss.Commands.Add([System.Management.Automation.Runspaces.SessionStateFunctionEntry]::new('Update-GridViev', ${function:Update-GridViev}))
+$iss.Commands.Add([System.Management.Automation.Runspaces.SessionStateFunctionEntry]::new('Update-DGV', ${function:Update-DGV}))
 $iss.Commands.Add([System.Management.Automation.Runspaces.SessionStateFunctionEntry]::new('Update-ServiceStatus', ${function:Update-ServiceStatus}))
 
 $runspacePool = [runspacefactory]::CreateRunspacePool(1, 1, $iss, $Host)
 $runspacePool.Open()
 
-$timer.Add_Tick({
+$timerAction = {
+	if ($script:_isClosing) { return }
+
 	$ps = [powershell]::Create()
 	$ps.RunspacePool = $runspacePool
 
 	$ps.AddScript({
-		param($FormRef)
-		if ($null -eq $FormRef -or $FormRef.IsDisposed) { return }
-		$listCOMports = @(List-COM-Ports)
-		if ($FormRef.IsHandleCreated) {
-			$FormRef.Invoke([action]{
-				Update-GridViev $FormRef.Tag.Dgv $listCOMports
-				Update-ServiceStatus $FormRef.Tag.SrvCtrlPBF
-				Update-ServiceStatus $FormRef.Tag.SrvCtrlDC
-			})
-		}
-	}).AddArgument($frmMain)
+		param($FormRef, $ClosingFlagRef)
+
+		try {
+			if ($ClosingFlagRef.Value) { return }
+			if ($null -eq $FormRef -or $FormRef.IsDisposed) { return }
+
+			$listCOMports = @(List-COM-Ports)
+
+			if ($ClosingFlagRef.Value) { return }
+			if ($FormRef.IsDisposed -or -not $FormRef.IsHandleCreated) { return }
+
+			$dvg     = $FormRef.Tag.Dgv
+			$srvPBF  = $FormRef.Tag.SrvCtrlPBF
+			$srvDC   = $FormRef.Tag.SrvCtrlDC
+
+			if ($null -eq $dvg -or $dvg.IsDisposed) { return }
+
+			$FormRef.BeginInvoke([action]{
+				try {
+					if ($ClosingFlagRef.Value) { return }
+					if ($dvg.IsDisposed -or $srvPBF.IsDisposed -or $srvDC.IsDisposed) { return }
+
+					Update-DGV     $dvg $listCOMports
+					Update-ServiceStatus $srvPBF
+					Update-ServiceStatus $srvDC
+				} catch { }
+			}) | Out-Null
+		} catch { }
+	}).AddArgument($frmMain).AddArgument(([ref]$script:_isClosing)) | Out-Null
 
 	$null = $ps.BeginInvoke()
 
-	Register-ObjectEvent -InputObject $ps -EventName InvocationStateChanged -Action {
-		if ($Event.SourceEventArgs.InvocationStateInfo.State -eq 'Completed') {
-			$Event.MessageData.Dispose()
-			Unregister-Event -SourceIdentifier $EventSubscriber.SourceIdentifier
-		}
+	$subId = 'PSDone_' + [guid]::NewGuid().ToString('N')
+	Register-ObjectEvent -InputObject $ps -EventName InvocationStateChanged `
+		-SourceIdentifier $subId -Action {
+		try {
+			if ($Event.SourceEventArgs.InvocationStateInfo.State -eq 'Completed') {
+				$Event.MessageData.Dispose()
+			}
+		} catch { }
+		Unregister-Event -SourceIdentifier $EventSubscriber.SourceIdentifier -ErrorAction SilentlyContinue
 	} -MessageData $ps | Out-Null
+}
+
+$timer.Add_Tick($timerAction)
+
+# ==============================================================================
+$frmMain = Create-Form
+$frmMain.Text = "$($Config.Title) v$($Config.Version)"
+
+$frmMain.Add_Shown({
+	$frmMain.Activate()
+	Get-ServiceFiles $Service.PBF
+	Get-ServiceFiles $Service.DC
+	& $timerAction
+	$timer.Start()
+})
+
+$frmMain.Add_FormClosing({
+	$script:_isClosing = $true
+	$timer.Stop()
+	$timer.Dispose()
+
+	Get-EventSubscriber -ErrorAction SilentlyContinue |
+		Where-Object { $_.SourceIdentifier -like 'PSDone_*' } |
+		Unregister-Event -ErrorAction SilentlyContinue
+
+	if ($runspacePool) {
+		try {
+			$runspacePool.Close()
+			$runspacePool.Dispose()
+		} catch { }
+	}
 })
 
 # ==============================================================================
@@ -732,20 +789,39 @@ $frmMain.Add_Shown({
 	$frmMain.Activate()
 	Get-ServiceFiles $Service.PBF
 	Get-ServiceFiles $Service.DC
+	& $timerAction
 	$timer.Start()
 })
 
 $frmMain.Add_FormClosing({
+	$script:_isClosing = $true
 	$timer.Stop()
-	$timer.Dispose()
-	Get-EventSubscriber -ErrorAction SilentlyContinue | 
-		Where-Object { $_.SourceIdentifier -match 'InvocationStateChanged' } | 
-		Unregister-Event -ErrorAction SilentlyContinue
-	if ($runspacePool) {
-		$runspacePool.Close()
-		$runspacePool.Dispose()
+
+	if ($script:_psLock) {
+		foreach ($ps in $script:_activePS.ToArray()) {
+			try {
+				if ($ps.InvocationStateInfo.State -eq 'Running') { $ps.Stop() }
+				$ps.Dispose()
+			} catch { }
+		}
+		$script:_activePS.Clear()
 	}
-	Start-Sleep -Milliseconds 500
+
+	$timer.Dispose()
+
+	Get-EventSubscriber -ErrorAction SilentlyContinue |
+		Where-Object { $_.SourceIdentifier -like 'PSDone_*' } |
+		Unregister-Event -ErrorAction SilentlyContinue
+
+	if ($runspacePool) {
+		try {
+			$runspacePool.Close()
+			$runspacePool.Dispose()
+		} catch { }
+	}
+
+	[System.Windows.Forms.Application]::Exit()
+	[System.Environment]::Exit(0)
 })
 
 # ==============================================================================
