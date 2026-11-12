@@ -1,7 +1,7 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.7.0'
+	Version           = '1.7.1'
 	ServerUrl         = 'https://raw.githubusercontent.com/mozers3/POS-Services-Manager/main'
 }
 
@@ -42,6 +42,18 @@ $Service = @{
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
+
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class Win32 {
+	[DllImport("user32.dll", CharSet = CharSet.Auto)]
+	public static extern IntPtr SendMessage(IntPtr hWnd, int wMsg, bool wParam, int lParam);
+
+	public const int WM_SETREDRAW = 0x000B;
+}
+"@
 
 Add-Type -Namespace '' -Name 'ComPortProbe' -MemberDefinition @'
 	[System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError=true, CharSet=System.Runtime.InteropServices.CharSet.Auto)]
@@ -512,41 +524,51 @@ function List-COM-Ports() {
 }
 
 function Update-DGV ($dgv, $listCOMports) {
-	$dgv.SuspendLayout()
-	foreach ($row in $dgv.Rows) { $row.Tag = "ToDelete" }
-	foreach ($port in $listCOMports) {
-		$found = $false
+	if ($null -eq $dgv -or $dgv.IsDisposed -or -not $dgv.IsHandleCreated) { return }
+
+	[Win32]::SendMessage($dgv.Handle, [Win32]::WM_SETREDRAW, $false, 0)
+	try {
 		foreach ($row in $dgv.Rows) {
-			if ($row.Cells["COM"].Value -eq $port.COM) {
-				$row.Cells["Status"].Value = $port.Status
-				$row.Cells["VidPid"].Value = $port.VidPid
-				$row.Cells["FriendlyName"].Value = $port.FriendlyName
+			$row.Tag = "ToDelete"
+		}
 
-				if ($port.Status -ne "Free") {
-					$row.DefaultCellStyle.ForeColor = 'Orange'
-					$row.DefaultCellStyle.SelectionForeColor = 'Yellow'
-				} else {
-					$row.DefaultCellStyle = New-Object System.Windows.Forms.DataGridViewCellStyle
+		foreach ($port in $listCOMports) {
+			$found = $false
+			foreach ($row in $dgv.Rows) {
+				if ($row.Cells["COM"].Value -eq $port.COM) {
+					$row.Cells["Status"].Value = $port.Status
+					$row.Cells["VidPid"].Value = $port.VidPid
+					$row.Cells["FriendlyName"].Value = $port.FriendlyName
+
+					if ($port.Status -ne "Free") {
+						$row.DefaultCellStyle.ForeColor = [System.Drawing.Color]::Orange
+						$row.DefaultCellStyle.SelectionForeColor = [System.Drawing.Color]::Yellow
+					} else {
+						$row.DefaultCellStyle.ForeColor = $dgv.DefaultCellStyle.ForeColor
+						$row.DefaultCellStyle.SelectionForeColor = $dgv.DefaultCellStyle.SelectionForeColor
+					}
+
+					$row.Tag = "Keep"
+					$found = $true
+					break
 				}
+			}
 
-				$row.Tag = "Keep" # Снимаем метку удаления
-				$found = $true
-				break
+			if (-not $found) {
+				$dgv.Rows.Add($port.Status, $port.COM, $port.VidPid, $port.FriendlyName)
 			}
 		}
-		# Если порта не было в таблице, добавляем новую строку
-		if (-not $found) {
-			$dgv.Rows.Add($port.Status, $port.COM, $port.VidPid, $port.FriendlyName)
-		}
-	}
-	# Удаляем только те строки, которые остались с меткой "ToDelete" (устройства отключились)
-	for ($i = $dgv.Rows.Count - 1; $i -ge 0; $i--) {
-		if ($dgv.Rows[$i].Tag -eq "ToDelete") {
-			$dgv.Rows.RemoveAt($i)
-		}
-	}
 
-	$dgv.ResumeLayout()
+		for ($i = $dgv.Rows.Count - 1; $i -ge 0; $i--) {
+			if ($dgv.Rows[$i].Tag -eq "ToDelete") {
+				$dgv.Rows.RemoveAt($i)
+			}
+		}
+	}
+	finally {
+		[Win32]::SendMessage($dgv.Handle, [Win32]::WM_SETREDRAW, $true, 0)
+		$dgv.Refresh()
+	}
 }
 
 function Update-ServiceStatus($svControl) {
