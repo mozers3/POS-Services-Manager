@@ -1,7 +1,7 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.7.1'
+	Version           = '1.7.2'
 	ServerUrl         = 'https://raw.githubusercontent.com/mozers3/POS-Services-Manager/main'
 }
 
@@ -508,6 +508,7 @@ function List-COM-Ports() {
 			'VID_1234&PID_0101' = 'PAX Q25'
 			'VID_2FB8&PID_1101' = 'PAX D230'
 			'VID_2FB8&PID_3101' = 'PAX S210 Pinpad'
+			'VID_18D1&PID_4001' = 'Feitian F20'
 		}
 		$model = $map[$VidPid]
 		if (-not $model) { $model = $VidPid }
