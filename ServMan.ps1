@@ -356,6 +356,7 @@ function Create-Form () {
 			Dock = "Fill"
 			TextAlign = "Center"
 			Margin = "10, 10, 10, 15"
+			ReadOnly = $true
 		}
 
 		$btnTestApp = New-Object System.Windows.Forms.Button -Property @{
