@@ -1,8 +1,16 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.7.2'
+	Version           = '1.8.0'
 	ServerUrl         = 'https://raw.githubusercontent.com/mozers3/POS-Services-Manager/main'
+}
+
+$appIcon = & {
+	Add-Type -AssemblyName System.Drawing
+	$iconBase64 = "AAABAAEAEBAQAAEABAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAwMDAAICAgAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAAAAAAAAAAAAAAAAADAAAAAAALMAsAMwAAAACzPwOwAAAAAwv7+wMAAAADvwAPswAAAAAwDwDwAPgAgLOPCzAAB4jwMA8AsACA+P8PeAAAAH/wAP/wAAAICADwCAAAAAAP8PD3AAAAAIcPgA8AAAAACADwAAAAAAAAAIAAAAAAD/j/IE/InyBPgA8gT8AfIE+ADyBPgA8gSQAPIEAAHyBIAB8gQAG/IEAB/yBAAf8gSAP/IEgD/yBNF/8gT7//IE"
+	$iconBytes = [Convert]::FromBase64String($iconBase64)
+	$stream = [System.IO.MemoryStream]::new($iconBytes)
+	return [System.Drawing.Icon]::new($stream)
 }
 
 if ($cmdLine -eq "COMPILE") { 
@@ -14,7 +22,10 @@ if ($cmdLine -eq "COMPILE") {
 			return
 		}
 	}
-	$iconPath = "$PSScriptRoot\ServMan.ico"
+	$iconPath = "$env:temp\ServMan.ico"
+	$stream = [System.IO.File]::Create($iconPath)
+	$appIcon.Save($stream)
+	$stream.Close()
 	Invoke-PS2EXE -InputFile $PSCommandPath -x86 -noConsole -verbose -IconFile $iconPath -Title $Config.Title -Product $Config.Title -Copyright 'https://github.com/mozers3' -Company 'mozers™' -Version $Config.Version
 	$exePath = [System.IO.Path]::ChangeExtension($PSCommandPath, '.exe')
 	$hash = (Get-FileHash -Path $exePath -Algorithm MD5).Hash
@@ -382,6 +393,13 @@ function Create-Form () {
 				[System.Windows.Forms.MessageBox]::Show("Log от $($Date.ToString('dd.MM.yyyy')) отсутствует!`n(Вероятно, сервис сегодня не запускался)", "Warning", 'OK', 'Warning')
 			}
 		}.GetNewClosure())
+		$cms = New-Object System.Windows.Forms.ContextMenuStrip
+		$menuItem = $cms.Items.Add('Открыть папку с логами')
+		$menuItem.Add_Click({ 
+			$filename =  $this.Owner.SourceControl.Tag
+			Start-Process explorer -ArgumentList "/select, `"$filename`""
+		})
+		$btnLog.ContextMenuStrip = $cms
 
 		$tlp = New-Object System.Windows.Forms.TableLayoutPanel -Property @{
 			Dock = "Fill"; ColumnCount = 5; RowCount = 1; ForeColor = [System.Drawing.SystemColors]::ControlText
@@ -412,11 +430,6 @@ function Create-Form () {
 		AutoScaleMode = "Font"
 		Font = [System.Drawing.Font]::new("Segoe UI", 12)
 		Padding = "10, 10, 10, 10"
-	}
-	if (!$PSCommandPath) {
-		$exePath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
-		$appIcon = [System.Drawing.Icon]::ExtractAssociatedIcon($exePath)
-		$form.Icon = $appIcon
 	}
 
 	$dgv = New-Object System.Windows.Forms.DataGridView
@@ -652,6 +665,7 @@ function Get-ServiceFiles($ServiceName) {
 
 	switch ($ServiceName) {
 		$Service.PBF {
+			$srvCtrl = $frmMain.Tag.SrvCtrlPBF
 			$imagePath = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName").ImagePath
 			$servicePath = $imagePath -replace '^"?(.+)\\.*', '$1'
 			$inifile = "$servicePath\config.ini"
@@ -663,29 +677,30 @@ function Get-ServiceFiles($ServiceName) {
 				if ($dVid -eq "1782" -and $dPid -eq "5D30") {$model = 'P8'}
 				elseif ($dVid -eq "1A86" -and $dPid -eq "7523") {$model = 'A99'}
 				else {$model = '???'}
-				$frmMain.Tag.SrvCtrlPBF.btnCOM.Text = "$model / $port"
-				$frmMain.Tag.SrvCtrlPBF.btnCOM.Tag = $inifile
+				$srvCtrl.btnCOM.Text = "$model / $port"
+				$srvCtrl.btnCOM.Tag = $inifile
 			} else {
 				[System.Windows.Forms.MessageBox]::Show("Файл конфигурации`n$inifile`nотсутствует!", "Warning", 'OK', 'Warning')
 			}
 			$testAppPath = $servicePath -replace '[^\\]*$', ''
 			$testApp = "$testAppPath\PosConnector\poscon_tester_gui.exe"
 			if ([System.IO.File]::Exists($testApp)) {
-				$frmMain.Tag.SrvCtrlPBF.btnTestApp.Tag = $testApp
+				$srvCtrl.btnTestApp.Tag = $testApp
 			} else {
 				[System.Windows.Forms.MessageBox]::Show("Тестовое приложение`n$testApp`nотсутствует!", "Warning", 'OK', 'Warning')
-				$frmMain.Tag.SrvCtrlPBF.btnTestApp.Enabled = $false
+				$srvCtrl.btnTestApp.Enabled = $false
 			}
-			$frmMain.Tag.SrvCtrlPBF.btnLog.Tag = "$servicePath\pbfproxy_$($Date.ToString('yyyy-MM-dd')).log"
+			$srvCtrl.btnLog.Tag = "$servicePath\pbfproxy_$($Date.ToString('yyyy-MM-dd')).log"
 		}
 		$Service.DC {
+			$srvCtrl = $frmMain.Tag.SrvCtrlDC
 			$imagePath = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\DCService").ImagePath
 			$servicePath = $imagePath -replace '^"?(.+)\\bin\\.*', '$1'
 			$xmlfile = "$servicePath\config\Connector.xml"
 			if ([System.IO.File]::Exists($xmlfile)) {
 				$port = (Select-Xml -Path $xmlfile -XPath '//CONNECTION_PORT').Node.InnerText
-				$frmMain.Tag.SrvCtrlDC.btnCOM.Text = $port
-				$frmMain.Tag.SrvCtrlDC.btnCOM.Tag = $xmlfile
+				$srvCtrl.btnCOM.Text = $port
+				$srvCtrl.btnCOM.Tag = $xmlfile
 			} else {
 				[System.Windows.Forms.MessageBox]::Show("Файл конфигурации`n$xmlfile`nотсутствует!", "Warning", 'OK', 'Warning')
 			}
@@ -693,12 +708,12 @@ function Get-ServiceFiles($ServiceName) {
 			$testApp = "$testAppPath\DCControl.bat"
 			if (![System.IO.File]::Exists($testApp)) { $testApp = "$testAppPath\DC Control.exe" } # Pos Connector version 0.1.?
 			if ([System.IO.File]::Exists($testApp)) {
-				$frmMain.Tag.SrvCtrlDC.btnTestApp.Tag = $testApp
+				$srvCtrl.btnTestApp.Tag = $testApp
 			} else {
 				[System.Windows.Forms.MessageBox]::Show("Тестовое приложение`n$testApp`nотсутствует!", "Warning", 'OK', 'Warning')
-				$frmMain.Tag.SrvCtrlDC.btnTestApp.Enabled = $false
+				$srvCtrl.btnTestApp.Enabled = $false
 			}
-			$frmMain.Tag.SrvCtrlDC.btnLog.Tag = "$servicePath\log\Connector$($Date.ToString('yyyyMMdd')).log"
+			$srvCtrl.btnLog.Tag = "$servicePath\log\Connector$($Date.ToString('yyyyMMdd')).log"
 		}
 	}
 }
@@ -778,35 +793,7 @@ $timer.Add_Tick($timerAction)
 
 # ==============================================================================
 $frmMain = Create-Form
-$frmMain.Text = "$($Config.Title) v$($Config.Version)"
-
-$frmMain.Add_Shown({
-	$frmMain.Activate()
-	Get-ServiceFiles $Service.PBF
-	Get-ServiceFiles $Service.DC
-	& $timerAction
-	$timer.Start()
-})
-
-$frmMain.Add_FormClosing({
-	$script:_isClosing = $true
-	$timer.Stop()
-	$timer.Dispose()
-
-	Get-EventSubscriber -ErrorAction SilentlyContinue |
-		Where-Object { $_.SourceIdentifier -like 'PSDone_*' } |
-		Unregister-Event -ErrorAction SilentlyContinue
-
-	if ($runspacePool) {
-		try {
-			$runspacePool.Close()
-			$runspacePool.Dispose()
-		} catch { }
-	}
-})
-
-# ==============================================================================
-$frmMain = Create-Form
+$frmMain.Icon = $appIcon
 $frmMain.Text = "$($Config.Title) v$($Config.Version)"
 
 $frmMain.Add_Shown({
