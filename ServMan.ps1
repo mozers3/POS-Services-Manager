@@ -397,7 +397,8 @@ function Create-Form () {
 		$menuItem = $cms.Items.Add('Открыть папку с логами')
 		$menuItem.Add_Click({ 
 			$filename =  $this.Owner.SourceControl.Tag
-			Start-Process explorer -ArgumentList "/select, `"$filename`""
+			$arguments = if (Test-Path $filename) {"/select,`"$filename`""} else {"`"$(Split-Path $filename -Parent)`""}
+			Start-Process explorer.exe -ArgumentList $arguments
 		})
 		$btnLog.ContextMenuStrip = $cms
 
