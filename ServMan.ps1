@@ -1,7 +1,7 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.8.0'
+	Version           = '1.9.0'
 	ServerUrl         = 'https://raw.githubusercontent.com/mozers3/POS-Services-Manager/main'
 }
 
@@ -338,6 +338,41 @@ exit
 	exit 
 }
 
+function Log-Viewer {
+	param (
+		[string]$filePath
+	)
+
+	$form = New-Object System.Windows.Forms.Form -Property @{
+		Width = 900
+		Height = 600
+		Text = $filePath
+		Icon = $appIcon
+	}
+	$form.Add_Load({
+		$textBox.Text = Get-Content -Path $filePath -Raw
+	})
+	$form.Add_Shown({
+		$textBox = $this.Controls[0]
+		$textBox.SelectionStart = $textBox.Text.Length
+		$textBox.SelectionLength = 0
+		$textBox.ScrollToCaret()
+	}.GetNewClosure())
+
+	$textBox = New-Object System.Windows.Forms.TextBox -Property @{
+		Dock = [System.Windows.Forms.DockStyle]::Fill
+		Font = New-Object System.Drawing.Font("Consolas", 11)
+		BackColor = "Window"
+		Multiline = $true
+		ReadOnly = $true
+		WordWrap = $false
+		ScrollBars = "Both"
+	}
+	$form.Controls.Add($textBox)
+
+	[void]$form.Show()
+}
+
 function Create-Form () {
 	function New-ServiceControl([string]$ServiceName) {
 		$btnCOM = New-Object System.Windows.Forms.Button -Property @{
@@ -388,9 +423,11 @@ function Create-Form () {
 		}
 		$btnLog.Add_Click({
 			if ([System.IO.File]::Exists($this.Tag)) {
-				Start-Process -FilePath notepad -ArgumentList $this.Tag
+				Log-Viewer $this.Tag
 			} else {
-				[System.Windows.Forms.MessageBox]::Show("Log от $($Date.ToString('dd.MM.yyyy')) отсутствует!`n(Вероятно, сервис сегодня не запускался)", "Warning", 'OK', 'Warning')
+				if ([System.Windows.Forms.MessageBox]::Show("Log от $($Date.ToString('dd.MM.yyyy')) отсутствует!`nВероятно, сервис сегодня не запускался`n`nОткрыть папку с LOG файлами?", "Подтверждение", "YesNo", "Question") -eq "Yes") {
+					Start-Process explorer.exe -ArgumentList "`"$(Split-Path $this.Tag -Parent)`""
+				}
 			}
 		}.GetNewClosure())
 		$cms = New-Object System.Windows.Forms.ContextMenuStrip
