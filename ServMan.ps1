@@ -287,7 +287,7 @@ function Get-Update {
 	$ver, $hash = $remoteVersion.Split('*')
 	if ($ver -eq $Config.Version) { return $null }
 
-	$msg = "Доступна новая версия приложения: $ver`n`nЗагрузить и установить?"
+	$msg = "Доступна новая версия приложения: $ver`n`nВыполнить обновление?"
 	$result = [System.Windows.Forms.MessageBox]::Show($msg, "$($Config.Title) $($Config.Version)", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
 	if ($result -ne 'Yes') { return $null }
 
