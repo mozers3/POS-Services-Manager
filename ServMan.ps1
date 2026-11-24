@@ -1,7 +1,7 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.9.0'
+	Version           = '1.10.0'
 	ServerUrl         = 'https://raw.githubusercontent.com/mozers3/POS-Services-Manager/main'
 }
 
@@ -405,17 +405,6 @@ function Create-Form () {
 			ReadOnly = $true
 		}
 
-		$btnTestApp = New-Object System.Windows.Forms.Button -Property @{
-			Dock = "Fill"
-			Text = "Test"
-			Margin = "10, 5, 10, 15"
-		}
-		$btnTestApp.Add_Click({
-			Start-Process -FilePath $this.Tag
-		}.GetNewClosure())
-		$btnTestAppToolTip = if ($ServiceName -eq $Service.DC) { "DC Control"} else { "POS Connector"}
-		$toolTip.SetToolTip($btnTestApp, $btnTestAppToolTip)
-
 		$btnLog = New-Object System.Windows.Forms.Button -Property @{
 			Dock = "Fill"
 			Text = "Log"
@@ -439,6 +428,38 @@ function Create-Form () {
 		})
 		$btnLog.ContextMenuStrip = $cms
 
+		$btnTestApp = New-Object System.Windows.Forms.Button -Property @{
+			Dock = "Fill"
+			Text = "Test"
+			Margin = "10, 5, 10, 15"
+		}
+		$btnTestApp.Add_Click({
+			Start-Process -FilePath $this.Tag
+		}.GetNewClosure())
+		$btnTestAppToolTip = if ($ServiceName -eq $Service.DC) { "DC Control"} else { "POS Connector"}
+		$toolTip.SetToolTip($btnTestApp, $btnTestAppToolTip)
+
+		$cms = New-Object System.Windows.Forms.ContextMenuStrip
+		$menuItem = $cms.Items.Add('Открыть log')
+		$menuItem.Add_Click({ 
+			$exepath =  Split-Path $this.Owner.SourceControl.Tag -Parent
+			if ((Split-Path -Path $exepath -Leaf) -eq "PosConnector") {
+				$logpath = Join-Path $exepath "log$($Date.ToString('yyyy-MM-dd')).txt"
+			} else {
+				$logpath = Join-Path $exepath "Service\log\Connector$($Date.ToString('yyyyMMdd')).log"
+			}
+			if ([System.IO.File]::Exists($logpath)) {
+				Log-Viewer $logpath
+			} else {
+				if ([System.Windows.Forms.MessageBox]::Show("Log от $($Date.ToString('dd.MM.yyyy')) отсутствует!`nВероятно, Connector сегодня не запускался`n`nОткрыть папку с LOG файлами?", "Подтверждение", "YesNo", "Question") -eq "Yes") {
+					Start-Process explorer.exe -ArgumentList "`"$(Split-Path $logpath -Parent)`""
+				}
+			}
+		})
+		$btnTestApp.ContextMenuStrip = $cms
+
+
+
 		$tlp = New-Object System.Windows.Forms.TableLayoutPanel -Property @{
 			Dock = "Fill"; ColumnCount = 5; RowCount = 1; ForeColor = [System.Drawing.SystemColors]::ControlText
 		}
@@ -451,15 +472,15 @@ function Create-Form () {
 		[void]$tlp.Controls.Add($btnCOM, 0, 0)
 		[void]$tlp.Controls.Add($btnStartStop,  1, 0)
 		[void]$tlp.Controls.Add($txtStatus, 2, 0)
-		[void]$tlp.Controls.Add($btnTestApp, 3, 0)
-		[void]$tlp.Controls.Add($btnLog, 4, 0)
+		[void]$tlp.Controls.Add($btnLog, 3, 0)
+		[void]$tlp.Controls.Add($btnTestApp, 4, 0)
 
 		$gb = New-Object System.Windows.Forms.GroupBox -Property @{
 			Text = $ServiceName; Dock = "Fill"; Padding = "5, 0, 5, 5"; ForeColor = 'Navy'
 		}
 		$gb.Controls.Add($tlp)
 
-		[PSCustomObject]@{ GroupBox = $gb; btnCOM = $btnCOM; btnStartStop = $btnStartStop; txtStatus = $txtStatus; btnTestApp = $btnTestApp; btnLog = $btnLog; }
+		[PSCustomObject]@{ GroupBox = $gb; btnCOM = $btnCOM; btnStartStop = $btnStartStop; txtStatus = $txtStatus; btnLog = $btnLog; btnTestApp = $btnTestApp;}
 	}
 
 	$form = New-Object System.Windows.Forms.Form -Property @{
@@ -558,6 +579,7 @@ function List-COM-Ports() {
 			'VID_1782&PID_5D30' = 'UniTodi P8 Bio'
 			'VID_1A86&PID_7523' = 'Aisino A99 Lite'
 			'VID_1234&PID_0101' = 'PAX Q25'
+			'VID_2FB8&PID_1102' = 'PAX Q25'
 			'VID_2FB8&PID_1101' = 'PAX D230'
 			'VID_2FB8&PID_3101' = 'PAX S210 Pinpad'
 			'VID_18D1&PID_4001' = 'Feitian F20'
@@ -721,20 +743,20 @@ function Get-ServiceFiles($ServiceName) {
 				[System.Windows.Forms.MessageBox]::Show("Файл конфигурации`n$inifile`nотсутствует!", "Warning", 'OK', 'Warning')
 			}
 			$testAppPath = $servicePath -replace '[^\\]*$', ''
-			$testApp = "$testAppPath\PosConnector\poscon_tester_gui.exe"
+			$testApp = Join-Path $testAppPath "PosConnector\poscon_tester_gui.exe"
 			if ([System.IO.File]::Exists($testApp)) {
 				$srvCtrl.btnTestApp.Tag = $testApp
 			} else {
 				[System.Windows.Forms.MessageBox]::Show("Тестовое приложение`n$testApp`nотсутствует!", "Warning", 'OK', 'Warning')
 				$srvCtrl.btnTestApp.Enabled = $false
 			}
-			$srvCtrl.btnLog.Tag = "$servicePath\pbfproxy_$($Date.ToString('yyyy-MM-dd')).log"
+			$srvCtrl.btnLog.Tag = Join-Path $servicePath "pbfproxy_$($Date.ToString('yyyy-MM-dd')).log"
 		}
 		$Service.DC {
 			$srvCtrl = $frmMain.Tag.SrvCtrlDC
 			$imagePath = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\DCService").ImagePath
 			$servicePath = $imagePath -replace '^"?(.+)\\bin\\.*', '$1'
-			$xmlfile = "$servicePath\config\Connector.xml"
+			$xmlfile = Join-Path $servicePath "config\Connector.xml"
 			if ([System.IO.File]::Exists($xmlfile)) {
 				$port = (Select-Xml -Path $xmlfile -XPath '//CONNECTION_PORT').Node.InnerText
 				$srvCtrl.btnCOM.Text = $port
@@ -743,15 +765,15 @@ function Get-ServiceFiles($ServiceName) {
 				[System.Windows.Forms.MessageBox]::Show("Файл конфигурации`n$xmlfile`nотсутствует!", "Warning", 'OK', 'Warning')
 			}
 			$testAppPath = $servicePath -replace '[^\\]*$', ''
-			$testApp = "$testAppPath\DCControl.bat"
-			if (![System.IO.File]::Exists($testApp)) { $testApp = "$testAppPath\DC Control.exe" } # Pos Connector version 0.1.?
+			$testApp = Join-Path $testAppPath "DCControl.bat"
+			if (![System.IO.File]::Exists($testApp)) { $testApp = Join-Path $testAppPath "DC Control.exe" } # Pos Connector version 0.1.?
 			if ([System.IO.File]::Exists($testApp)) {
 				$srvCtrl.btnTestApp.Tag = $testApp
 			} else {
 				[System.Windows.Forms.MessageBox]::Show("Тестовое приложение`n$testApp`nотсутствует!", "Warning", 'OK', 'Warning')
 				$srvCtrl.btnTestApp.Enabled = $false
 			}
-			$srvCtrl.btnLog.Tag = "$servicePath\log\Connector$($Date.ToString('yyyyMMdd')).log"
+			$srvCtrl.btnLog.Tag = Join-Path $servicePath "log\DCControl$($Date.ToString('yyyyMMdd')).log"
 		}
 	}
 }
