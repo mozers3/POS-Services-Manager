@@ -1,7 +1,7 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.10.0'
+	Version           = '1.10.1'
 	ServerUrl         = 'https://raw.githubusercontent.com/mozers3/POS-Services-Manager/main'
 }
 
@@ -433,11 +433,11 @@ function Create-Form () {
 			Text = "Test"
 			Margin = "10, 5, 10, 15"
 		}
+		$btnTestApp.Text = if ($ServiceName -eq $Service.DC) { "DC Control"} else { "POS Connector"}
 		$btnTestApp.Add_Click({
 			Start-Process -FilePath $this.Tag
 		}.GetNewClosure())
-		$btnTestAppToolTip = if ($ServiceName -eq $Service.DC) { "DC Control"} else { "POS Connector"}
-		$toolTip.SetToolTip($btnTestApp, $btnTestAppToolTip)
+		$toolTip.SetToolTip($btnTestApp, "Правая кнопка - открыть log")
 
 		$cms = New-Object System.Windows.Forms.ContextMenuStrip
 		$menuItem = $cms.Items.Add('Открыть log')
@@ -468,7 +468,7 @@ function Create-Form () {
 		[void]$tlp.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new($ST::Absolute, 60))
 		[void]$tlp.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new($ST::Percent, 100))
 		[void]$tlp.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new($ST::Absolute, 90))
-		[void]$tlp.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new($ST::Absolute, 90))
+		[void]$tlp.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new($ST::Absolute, 150))
 		[void]$tlp.Controls.Add($btnCOM, 0, 0)
 		[void]$tlp.Controls.Add($btnStartStop,  1, 0)
 		[void]$tlp.Controls.Add($txtStatus, 2, 0)
