@@ -1,7 +1,7 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.10.23'
+	Version           = '1.12.0.23'
 	ServerUrl         = 'https://raw.githubusercontent.com/mozers3/POS-Services-Manager/main'
 }
 
@@ -484,7 +484,7 @@ function Create-Form {
 	}
 
 	$form = New-Object System.Windows.Forms.Form -Property @{
-		Size = "500, 250"
+		Size = "500, 300"
 		StartPosition = "CenterScreen"
 		AutoScaleMode = "Font"
 		Font = [System.Drawing.Font]::new("Segoe UI", 12)
@@ -530,24 +530,29 @@ function Create-Form {
 	$gbTop.Controls.Add($dgv)
 
 	$bottom = New-Object System.Windows.Forms.TableLayoutPanel -Property @{
-		Dock = "Bottom"; Height = 180; ColumnCount = 1; RowCount = 2
+		Dock = "Bottom"; Height = 270; ColumnCount = 1; RowCount = 3
 	}
 	$ST = [System.Windows.Forms.SizeType]
 	[void]$bottom.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new($ST::Percent, 100))
-	[void]$bottom.RowStyles.Add([System.Windows.Forms.RowStyle]::new($ST::Percent, 50))
-	[void]$bottom.RowStyles.Add([System.Windows.Forms.RowStyle]::new($ST::Percent, 50))
+	[void]$bottom.RowStyles.Add([System.Windows.Forms.RowStyle]::new($ST::Percent, 33))
+	[void]$bottom.RowStyles.Add([System.Windows.Forms.RowStyle]::new($ST::Percent, 33))
+	[void]$bottom.RowStyles.Add([System.Windows.Forms.RowStyle]::new($ST::Percent, 33))
 
-	$srvCtrlPBF = New-ServiceControl $Service.PBF
 	$srvCtrlDC = New-ServiceControl $Service.DC
-	$srvCtrlPBF.GroupBox.Margin = "0, 5, 0, 5"
-	$srvCtrlDC.GroupBox.Margin = "0, 5, 0, 0"
-	[void]$bottom.Controls.Add($srvCtrlPBF.GroupBox, 0, 0)
-	[void]$bottom.Controls.Add($srvCtrlDC.GroupBox, 0, 1)
+	$srvCtrlPBF = New-ServiceControl $Service.PBF
+	$srvCtrlOFD = New-ServiceControl $Service.OFD
+	
+	$srvCtrlDC.GroupBox.Margin = "0, 5, 0, 5"
+	$srvCtrlPBF.GroupBox.Margin = "0, 5, 0, 0"
+	$srvCtrlOFD.GroupBox.Margin = "0, 5, 0, 0"
+	[void]$bottom.Controls.Add($srvCtrlDC.GroupBox, 0, 0)
+	[void]$bottom.Controls.Add($srvCtrlPBF.GroupBox, 0, 1)
+	[void]$bottom.Controls.Add($srvCtrlOFD.GroupBox, 0, 2)
 
 	[void]$form.Controls.Add($gbTop)
 	[void]$form.Controls.Add($bottom)
 
-	$form.Tag = @{ Dgv = $dgv; SrvCtrlPBF = $srvCtrlPBF; SrvCtrlDC = $srvCtrlDC }
+	$form.Tag = @{ Dgv = $dgv; SrvCtrlDC = $srvCtrlDC; SrvCtrlPBF = $srvCtrlPBF; SrvCtrlOFD = $srvCtrlOFD; }
 
 	return $form
 }
@@ -733,8 +738,8 @@ function Get-ServiceFiles {
 	if (-not $svc) {return ""}
 
 	switch ($ServiceName) {
-		$Service.PBF {
-			$srvCtrl = $frmMain.Tag.SrvCtrlPBF
+		{ $_ -in $Service.PBF, $Service.OFD } {
+			$srvCtrl = if ($ServiceName -eq $Service.PBF) { $frmMain.Tag.SrvCtrlPBF } else { $frmMain.Tag.SrvCtrlOFD }
 			$imagePath = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName").ImagePath
 			$servicePath = $imagePath -replace '^"?(.+)\\.*', '$1'
 			$inifile = "$servicePath\config.ini"
@@ -759,7 +764,8 @@ function Get-ServiceFiles {
 				[System.Windows.Forms.MessageBox]::Show("Тестовое приложение`n$testApp`nотсутствует!", "Warning", 'OK', 'Warning')
 				$srvCtrl.btnTestApp.Enabled = $false
 			}
-			$srvCtrl.btnLog.Tag = Join-Path $servicePath "pbfproxy_$($Date.ToString('yyyy-MM-dd')).log"
+			$log = if ($ServiceName -eq $Service.PBF) { "pbf" } else { "ofd" }
+			$srvCtrl.btnLog.Tag = Join-Path $servicePath "$($log)proxy_$($Date.ToString('yyyy-MM-dd')).log"
 		}
 		$Service.DC {
 			$srvCtrl = $frmMain.Tag.SrvCtrlDC
@@ -826,19 +832,21 @@ $timerAction = {
 			if ($FormRef.IsDisposed -or -not $FormRef.IsHandleCreated) { return }
 
 			$dvg     = $FormRef.Tag.Dgv
-			$srvPBF  = $FormRef.Tag.SrvCtrlPBF
 			$srvDC   = $FormRef.Tag.SrvCtrlDC
+			$srvPBF  = $FormRef.Tag.SrvCtrlPBF
+			$srvOFD  = $FormRef.Tag.SrvCtrlOFD
 
 			if ($null -eq $dvg -or $dvg.IsDisposed) { return }
 
 			$FormRef.BeginInvoke([action]{
 				try {
 					if ($ClosingFlagRef.Value) { return }
-					if ($dvg.IsDisposed -or $srvPBF.IsDisposed -or $srvDC.IsDisposed) { return }
+					if ($dvg.IsDisposed -or $srvDC.IsDisposed -or $srvPBF.IsDisposed -or $srvOFD.IsDisposed) { return }
 
 					Update-DGV     $dvg $listCOMports
-					Update-ServiceStatus $srvPBF
 					Update-ServiceStatus $srvDC
+					Update-ServiceStatus $srvPBF
+					Update-ServiceStatus $srvOFD
 				} catch { }
 			}) | Out-Null
 		} catch { }
@@ -867,8 +875,9 @@ $frmMain.Text = "$($Config.Title) v$($Config.Version)"
 
 $frmMain.Add_Shown({
 	$frmMain.Activate()
-	Get-ServiceFiles $Service.PBF
 	Get-ServiceFiles $Service.DC
+	Get-ServiceFiles $Service.PBF
+	Get-ServiceFiles $Service.OFD
 	& $timerAction
 	$timer.Start()
 })
@@ -905,7 +914,9 @@ $frmMain.Add_FormClosing({
 })
 
 # ==============================================================================
-$frmMain.Tag.SrvCtrlPBF.btnCOM.Add_Click({
+function Set-ComVidPidSpeed {
+	param ([string]$ServiceName)
+
 	$inifile = $this.Tag
 	if (!$frmMain.Tag.Dgv.CurrentRow) {return}
 	$port = $frmMain.Tag.Dgv.CurrentRow.Cells[1].Value
@@ -919,16 +930,19 @@ $frmMain.Tag.SrvCtrlPBF.btnCOM.Add_Click({
 		return
 	}
 	if ([System.Windows.Forms.MessageBox]::Show("Изменить конфигурацию сервиса для $model ?`nБудут заданы:`nname=$port, VID=$dVID, PID=$dPID, speed=$speed", "Подтверждение", "YesNo", "Question") -eq "Yes") {
-		Stop-Service -Name $Service.PBF -Force -ErrorAction Stop -WarningAction SilentlyContinue
+		Stop-Service -Name $ServiceName -Force -ErrorAction Stop -WarningAction SilentlyContinue
 		$config = IniContent -FilePath $inifile
 		$config["SerialPort"]["name"] = $port
 		$config["SerialPort"]["vid"] = $dVid
 		$config["SerialPort"]["pid"] = $dPid
 		$config["SerialPort"]["speed"] = $speed
 		IniContent -FilePath $inifile -Config $config
-		Get-ServiceFiles $Service.PBF
+		Get-ServiceFiles $ServiceName
 	}
-})
+}
+
+$frmMain.Tag.SrvCtrlPBF.btnCOM.Add_Click({Set-ComVidPidSpeed $Service.PBF})
+$frmMain.Tag.SrvCtrlOFD.btnCOM.Add_Click({Set-ComVidPidSpeed $Service.OFD})
 
 $frmMain.Tag.SrvCtrlDC.btnCOM.Add_Click({
 	$xmlfile = $this.Tag
