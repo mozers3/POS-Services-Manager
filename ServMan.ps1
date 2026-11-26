@@ -1,7 +1,7 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.10.1'
+	Version           = '1.10.23'
 	ServerUrl         = 'https://raw.githubusercontent.com/mozers3/POS-Services-Manager/main'
 }
 
@@ -339,9 +339,7 @@ exit
 }
 
 function Log-Viewer {
-	param (
-		[string]$filePath
-	)
+	param ([string]$filePath)
 
 	$form = New-Object System.Windows.Forms.Form -Property @{
 		Width = 900
@@ -373,8 +371,10 @@ function Log-Viewer {
 	[void]$form.Show()
 }
 
-function Create-Form () {
-	function New-ServiceControl([string]$ServiceName) {
+function Create-Form {
+	function New-ServiceControl {
+		param ([string]$ServiceName)
+
 		$btnCOM = New-Object System.Windows.Forms.Button -Property @{
 			Dock = "Fill"
 			Margin = "10, 5, 10, 15"
@@ -552,7 +552,7 @@ function Create-Form () {
 	return $form
 }
 
-function List-COM-Ports() {
+function List-COM-Ports {
 	try {
 		$ports = Get-PnpDevice -Class Ports -Status OK -ErrorAction Stop 
 	} catch { $ports = @() }
@@ -598,7 +598,12 @@ function List-COM-Ports() {
 	return $Data.ToArray()
 }
 
-function Update-DGV ($dgv, $listCOMports) {
+function Update-DGV {
+	param (
+		[System.Windows.Forms.DataGridView]$dgv,
+		[psobject[]]$listCOMports
+	)
+
 	if ($null -eq $dgv -or $dgv.IsDisposed -or -not $dgv.IsHandleCreated) { return }
 
 	[Win32]::SendMessage($dgv.Handle, [Win32]::WM_SETREDRAW, $false, 0)
@@ -646,7 +651,9 @@ function Update-DGV ($dgv, $listCOMports) {
 	}
 }
 
-function Update-ServiceStatus($svControl) {
+function Update-ServiceStatus {
+	param([PSCustomObject]$svControl)
+
 	$svName = $svControl.GroupBox.Text
 	$sv = Get-Service -Name $svName -ErrorAction SilentlyContinue
 
@@ -719,7 +726,9 @@ function IniContent {
 	return $ini
 }
 
-function Get-ServiceFiles($ServiceName) {
+function Get-ServiceFiles {
+	param ([string]$ServiceName)
+
 	$svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 	if (-not $svc) {return ""}
 
@@ -923,9 +932,9 @@ $frmMain.Tag.SrvCtrlPBF.btnCOM.Add_Click({
 
 $frmMain.Tag.SrvCtrlDC.btnCOM.Add_Click({
 	$xmlfile = $this.Tag
+	if (!$frmMain.Tag.Dgv.CurrentRow) { return }
 	$port = $frmMain.Tag.Dgv.CurrentRow.Cells[1].Value
-	$model = $frmMain.Tag.Dgv.CurrentRow.Cells[2].Value
-	if ([System.Windows.Forms.MessageBox]::Show("Изменить конфигурацию сервиса?`nБудет задан CONNECTION_PORT $port", "Подтверждение", "YesNo", "Question") -eq "Yes") {
+	if ([System.Windows.Forms.MessageBox]::Show("Изменить конфигурацию сервиса?`nБудет задан <CONNECTION_PORT> $port", "Подтверждение", "YesNo", "Question") -eq "Yes") {
 		Stop-Service -Name $Service.DC -Force -ErrorAction Stop -WarningAction SilentlyContinue
 		(Get-Content $xmlfile -Raw) -replace '(?<=<CONNECTION_PORT>).*?(?=</CONNECTION_PORT>)', $port | Set-Content $xmlfile -Encoding UTF8
 		Get-ServiceFiles $Service.DC
