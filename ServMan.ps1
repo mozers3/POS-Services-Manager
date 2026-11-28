@@ -1,7 +1,7 @@
 ﻿param ([string]$cmdLine)
 $Config = @{
 	Title             = 'POS Services Manager'
-	Version           = '1.12.0.23'
+	Version           = '1.12.0.24'
 	ServerUrl         = 'https://raw.githubusercontent.com/mozers3/POS-Services-Manager/main'
 }
 
@@ -665,7 +665,6 @@ function Update-ServiceStatus {
 	if (-not $sv) {
 		if ($svControl.TxtStatus.Text -ne "Service not found!") {
 			$svControl.TxtStatus.Text = "Service not found!"
-			$svControl.TxtStatus.BackColor = 'Red'
 			$svControl.BtnStartStop.Enabled = $false
 			$svControl.BtnCOM.Enabled = $false
 			$svControl.btnTestApp.Enabled = $false
